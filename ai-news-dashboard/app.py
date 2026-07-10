@@ -57,3 +57,55 @@ with col2:
         st.bar_chart(sentiment_counts)
     else:
         st.info("Data sentimen belum tersedia.")
+
+# --- KODE UNTUK MENAMPILKAN DETAIL TOPIK DI APP.PY ---
+
+st.subheader("💡 Rekomendasi Topik Hari Ini")
+
+# Ambil data rekomendasi dari Supabase
+recommendations = supabase.table("recommendation").select("*").execute().data
+
+if not recommendations:
+    st.info("Belum ada data rekomendasi. Silakan jalankan pipeline pengolah data terlebih dahulu.")
+else:
+    for rec in recommendations:
+        # Membuat kotak dropdown yang bisa diklik (Expander)
+        with st.expander(f"📌 {rec['topic_name']} (Skor: {rec['recommendation_score']})"):
+            st.write(f"**Alasan Rekomendasi:** {rec['reason']}")
+            
+            # --- BAGIAN DETAIL TAMBAHAN (BIAR LEBIH DETAIL) ---
+            st.markdown("---")
+            st.write("📰 **Artikel Berita Terkait dalam Tren Ini:**")
+            
+            # Kita bersihkan teks kata kunci untuk mencari berita yang mirip di database
+            # Misal dari "Topik: di, jampidsus, korupsi" diambil kata kuncinya saja
+            clean_keywords = rec['topic_name'].replace("Topik:", "").split(",")
+            main_keyword = clean_keywords[-1].strip() if clean_keywords else ""
+            
+            if main_keyword and len(main_keyword) > 2:
+                # Cari berita di database yang judul atau kontennya mengandung kata kunci utama ini
+                related_news = supabase.table("news")\
+                    .select("title", "source", "url")\
+                    .ilike("title", f"%{main_keyword}%")\
+                    .limit(5)\
+                    .execute().data
+                
+                if related_news:
+                    for news in related_news:
+                        st.markdown(f"- [{news['title']}]({news['url']}) *({news['source']})*")
+                else:
+                    st.write("*Detail artikel sedang dimuat atau klasifikasi topik sangat umum.*")
+            else:
+                st.write("*Menampilkan kumpulan berita campuran makro harian.*")
+            
+            st.markdown("---")
+            # --- AKHIR BAGIAN DETAIL TAMBAHAN ---
+
+            # Tombol aksi redaksi
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("✅ Gunakan Topik", key=f"use_{rec['id']}"):
+                    st.success("Topik berhasil dipilih untuk produksi berita!")
+            with col2:
+                if st.button("❌ Abaikan", key=f"ignore_{rec['id']}"):
+                    st.warning("Topik diabaikan.")
