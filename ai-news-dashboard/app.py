@@ -51,12 +51,10 @@ with col_left:
                     st.markdown("---")
                     st.write("📰 **Artikel Berita Terkait dalam Tren Ini:**")
                     
-                    # --- PERBAIKAN LOGIKA EKSTRAKSI KATA KUNCI ---
-                    # Menghilangkan kata "Topik:" dan memisahkan berdasarkan koma
+                    # Logika ekstraksi kata kunci
                     clean_text = rec['topic_name'].replace("Topik:", "").strip()
                     keywords = [k.strip() for k in clean_text.split(",") if len(k.strip()) > 2]
                     
-                    # Memilih kata kunci yang valid (bukan kata hubung/kata depan)
                     main_keyword = ""
                     stop_words = ['di', 'dan', 'yang', 'untuk', 'ke', 'dari', 'dengan', 'dalam']
                     for kw in keywords:
@@ -64,11 +62,9 @@ with col_left:
                             main_keyword = kw
                             break
                     
-                    # Jika semua kata berupa stop words, ambil kata pertama saja
                     if not main_keyword and keywords:
                         main_keyword = keywords[0]
                     
-                    # Jalankan query pencarian jika kata kunci ditemukan
                     if main_keyword:
                         related_news = supabase.table("news")\
                             .select("title", "source", "url")\
@@ -103,47 +99,54 @@ with col_right:
     st.subheader("📈 Sekilas Sentimen Terakhir")
     
     try:
-        # --- PERBAIKAN QUERY: Diarahkan langsung ke tabel 'news' agar sinkron dengan total records ---
-        news_data = supabase.table("news").select("sentiment").execute().data
+        # --- KEMBALI KE TABEL SENTIMENT ---
+        # Mengambil semua kolom dari tabel 'sentiment' agar kita aman memproses nama kolomnya
+        sentiment_data = supabase.table("sentiment").select("*").execute().data
         
-        if not news_data:
-            st.info("Data sentimen di tabel berita belum tersedia.")
+        if not sentiment_data:
+            st.info("Data sentimen di database belum tersedia.")
         else:
-            # Konversi hasil query database ke bentuk DataFrame Pandas
-            df_news = pd.DataFrame(news_data)
+            # Konversi ke DataFrame
+            df_sentiment = pd.DataFrame(sentiment_data)
             
-            # Memastikan kolom 'sentiment' ada dan memiliki data sebelum dihitung
-            if 'sentiment' in df_news.columns and not df_news['sentiment'].isnull().all():
-                # Hitung jumlah total kemunculan tiap kategori sentiment
-                sentiment_counts = df_news['sentiment'].value_counts().reset_index()
-                sentiment_counts.columns = ['Sentimen', 'Jumlah']
+            # Deteksi otomatis nama kolom yang menampung label (misal namanya 'sentiment' atau 'label' atau 'prediction')
+            kolom_target = None
+            for col in df_sentiment.columns:
+                if col.lower() in ['sentiment', 'label', 'prediction', 'hasil']:
+                    kolom_target = col
+                    break
+            
+            # Jika tidak sengaja nama kolomnya beda, pakai kolom pertama yang bertipe teks
+            if not kolom_target:
+                kolom_target = df_sentiment.columns[0]
                 
-                # Skema warna grafik untuk melingkupi teks bahasa Indonesia maupun bahasa Inggris dari model AI
-                color_map = {
-                    'positif': '#2ecc71', 'netral': '#3498db', 'negatif': '#e74c3c',
-                    'positive': '#2ecc71', 'neutral': '#3498db', 'negative': '#e74c3c'
-                }
-                
-                # Membuat visualisasi grafik batang interaktif menggunakan Plotly
-                fig = px.bar(
-                    sentiment_counts, 
-                    x='Sentimen', 
-                    y='Jumlah',
-                    color='Sentimen',
-                    color_discrete_map=color_map,
-                    text_auto=True
-                )
-                
-                fig.update_layout(
-                    showlegend=False,
-                    margin=dict(l=20, r=20, t=20, b=20),
-                    height=350
-                )
-                
-                # Tampilkan chart di dashboard Streamlit
-                st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.warning("Kolom 'sentiment' di tabel 'news' ditemukan, tetapi datanya masih kosong (NULL).")
+            # Hitung kemunculan kategori
+            sentiment_counts = df_sentiment[kolom_target].value_counts().reset_index()
+            sentiment_counts.columns = ['Sentimen', 'Jumlah']
+            
+            # Skema warna grafik
+            color_map = {
+                'positif': '#2ecc71', 'netral': '#3498db', 'negatif': '#e74c3c',
+                'positive': '#2ecc71', 'neutral': '#3498db', 'negative': '#e74c3c'
+            }
+            
+            # Membuat grafik batang
+            fig = px.bar(
+                sentiment_counts, 
+                x='Sentimen', 
+                y='Jumlah',
+                color='Sentimen',
+                color_discrete_map=color_map,
+                text_auto=True
+            )
+            
+            fig.update_layout(
+                showlegend=False,
+                margin=dict(l=20, r=20, t=20, b=20),
+                height=350
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
                 
     except Exception as e:
         st.error(f"Gagal memuat data grafik sentimen: {e}")
