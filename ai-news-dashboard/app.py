@@ -3,6 +3,8 @@ import os
 from supabase import create_client
 import pandas as pd
 import plotly.express as px
+# --- TAMBAHAN BARU: Import library untuk autorefresh ---
+from streamlit_autorefresh import st_autorefresh
 
 # 1. KONFIGURASI HALAMAN STREAMLIT
 st.set_page_config(
@@ -11,8 +13,11 @@ st.set_page_config(
     layout="wide"
 )
 
+# --- TAMBAHAN BARU: Set pemicu refresh otomatis setiap 5 menit (300.000 milidetik) ---
+# Ini akan memaksa Streamlit mengeksekusi ulang kode dari atas ke bawah secara otomatis
+st_autorefresh(interval=300000, key="supabase_data_sync")
+
 # 2. KONEKSI SUPABASE
-# Mengambil variabel env dari Streamlit Secrets atau Local Env
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 
@@ -35,13 +40,12 @@ with col_left:
     st.subheader("💡 Rekomendasi Topik Hari Ini")
     
     try:
-        # Ambil data rekomendasi dari database Supabase
+        # Menarik data langsung dari database (tanpa cache) agar selalu sinkron
         recommendations = supabase.table("recommendation").select("*").order("recommendation_score", desc=True).execute().data
         
         if not recommendations:
             st.info("Belum ada data rekomendasi. Silakan jalankan pipeline pengolah data terlebih dahulu.")
         else:
-            # Menggunakan enumerate(recommendations) untuk menjamin 'index' unik pada setiap tombol widget
             for index, rec in enumerate(recommendations):
                 with st.expander(f"📌 {rec['topic_name']} (Skor: {rec['recommendation_score']})"):
                     st.write(f"**Alasan Rekomendasi:** {rec['reason']}")
@@ -49,12 +53,10 @@ with col_left:
                     st.markdown("---")
                     st.write("📰 **Artikel Berita Terkait dalam Tren Ini:**")
                     
-                    # Ekstraksi kata kunci utama dari text nama topik untuk mencarian relasi berita
                     clean_keywords = rec['topic_name'].replace("Topik:", "").split(",")
                     main_keyword = clean_keywords[-1].strip() if clean_keywords else ""
                     
                     if main_keyword and len(main_keyword) > 2:
-                        # Cari maksimal 5 berita di tabel 'news' yang judulnya mirip kata kunci ini
                         related_news = supabase.table("news")\
                             .select("title", "source", "url")\
                             .ilike("title", f"%{main_keyword}%")\
@@ -71,7 +73,6 @@ with col_left:
                     
                     st.markdown("---")
                     
-                    # Bagian Tombol Aksi Redaksi dengan KEY yang unik (menggunakan gabungan indeks dan potongan nama topik)
                     btn_col1, btn_col2 = st.columns(2)
                     with btn_col1:
                         if st.button("✅ Gunakan Topik", key=f"use_{index}_{rec['topic_name'][:10]}"):
@@ -88,27 +89,27 @@ with col_right:
     st.subheader("📈 Sekilas Sentimen Terakhir")
     
     try:
-        # Ambil data dari tabel sentiment di Supabase
+        # Menarik data murni langsung dari tabel sentiment Supabase setiap siklus 5 menit
         sentiment_data = supabase.table("sentiment").select("sentiment").execute().data
         
         if not sentiment_data:
             st.info("Data sentimen belum tersedia.")
         else:
-            # Konversi hasil query database ke bentuk DataFrame Pandas
             df_sentiment = pd.DataFrame(sentiment_data)
             
-            # Hitung jumlah total kemunculan tiap kategori sentiment (positif, negatif, netral)
             sentiment_counts = df_sentiment['sentiment'].value_counts().reset_index()
             sentiment_counts.columns = ['Sentimen', 'Jumlah']
             
-            # Skema warna grafik agar serasi dan profesional
+            # Skema warna grafik (pastikan teks label di database berupa lowercase agar cocok)
             color_map = {
-                'positif': '#2ecc71', # Hijau
-                'netral': '#3498db',  # Biru
-                'negatif': '#e74c3c'  # Merah
+                'positif': '#2ecc71',
+                'netral': '#3498db',
+                'negatif': '#e74c3c',
+                'positive': '#2ecc71', # Antisipasi jika data bertuliskan bahasa inggris
+                'neutral': '#3498db',
+                'negative': '#e74c3c'
             }
             
-            # Membuat visualisasi grafik batang interaktif menggunakan Plotly
             fig = px.bar(
                 sentiment_counts, 
                 x='Sentimen', 
@@ -124,7 +125,6 @@ with col_right:
                 height=350
             )
             
-            # Tampilkan chart di dashboard Streamlit
             st.plotly_chart(fig, use_container_width=True)
             
     except Exception as e:
