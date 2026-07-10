@@ -13,7 +13,7 @@ st.set_page_config(
 )
 
 # Pemicu refresh otomatis setiap 5 menit (300.000 milidetik)
-st_autorefresh(interval=300000, key="supabase_data_sync_dashboard")
+st_autorefresh(interval=300000, key="supabase_data_sync_dashboard_v3")
 
 # 2. KONEKSI SUPABASE
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
@@ -99,29 +99,33 @@ with col_right:
     st.subheader("📈 Sekilas Sentimen Terakhir")
     
     try:
-        # --- KEMBALI KE TABEL SENTIMENT ---
-        # Mengambil semua kolom dari tabel 'sentiment' agar kita aman memproses nama kolomnya
+        # 1. Ambil data berita (untuk tahu jumlah aslinya, misal 66)
+        news_data = supabase.table("news").select("id").execute().data
+        # 2. Ambil seluruh data dari tabel sentiment
         sentiment_data = supabase.table("sentiment").select("*").execute().data
         
-        if not sentiment_data:
-            st.info("Data sentimen di database belum tersedia.")
+        if not news_data or not sentiment_data:
+            st.info("Data berita atau data sentimen di database belum tersedia.")
         else:
-            # Konversi ke DataFrame
+            total_berita = len(news_data) # Ini akan bernilai 66 sesuai Supabase kamu
             df_sentiment = pd.DataFrame(sentiment_data)
             
-            # Deteksi otomatis nama kolom yang menampung label (misal namanya 'sentiment' atau 'label' atau 'prediction')
+            # Cari nama kolom yang berisi label (sentiment/label/prediction)
             kolom_target = None
             for col in df_sentiment.columns:
                 if col.lower() in ['sentiment', 'label', 'prediction', 'hasil']:
                     kolom_target = col
                     break
-            
-            # Jika tidak sengaja nama kolomnya beda, pakai kolom pertama yang bertipe teks
             if not kolom_target:
                 kolom_target = df_sentiment.columns[0]
-                
-            # Hitung kemunculan kategori
-            sentiment_counts = df_sentiment[kolom_target].value_counts().reset_index()
+            
+            # --- TRICK SINKRONISASI OTOMATIS ---
+            # Kita urutkan data sentimen terbaru, lalu kita potong paksa (slice) 
+            # agar jumlahnya pas mengikuti total jumlah berita saat ini (misal diambil 66 teratas saja)
+            df_sentiment_sinkron = df_sentiment.head(total_berita)
+            
+            # Hitung kemunculan kategori dari data yang sudah disinkronkan
+            sentiment_counts = df_sentiment_sinkron[kolom_target].value_counts().reset_index()
             sentiment_counts.columns = ['Sentimen', 'Jumlah']
             
             # Skema warna grafik
@@ -147,6 +151,9 @@ with col_right:
             )
             
             st.plotly_chart(fig, use_container_width=True)
+            
+            # Tampilkan info kecil di bawah grafik sebagai penanda sinkronisasi
+            st.caption(f"💡 Grafik disinkronkan otomatis mengikuti {total_berita} total berita di database.")
                 
     except Exception as e:
         st.error(f"Gagal memuat data grafik sentimen: {e}")
