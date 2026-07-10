@@ -1,0 +1,9 @@
+supabase
+feedparser
+beautifulsoup4
+pandas
+transformers
+torch
+bertopic
+streamlit
+st-supabase-connection
