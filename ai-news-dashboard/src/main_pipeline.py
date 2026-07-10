@@ -50,19 +50,38 @@ def main():
     print("3. Menjalankan Topic Modeling & Rekomendasi...")
     df_analyzed, topic_info = extract_topics(df_news)
     
-    # Contoh logika sederhana pembuatan rekomendasi berdasarkan frekuensi topik
+    print("3. Menjalankan Topic Modeling & Rekomendasi...")
+    df_analyzed, topic_info = extract_topics(df_news)
+    
+    # KODE YANG DIPERBARUI:
+    has_recommendation = False
+    
     for idx, row in topic_info.iterrows():
-        if row['Topic'] == -1: continue # Skip outlier topic
-        
-        topic_name = ", ".join([word for word, _ in topic_model.get_topic(row['Topic'])[:3]])
-        
+        # Ubah logika: Jika belum ada kelompok terbentuk, biarkan outlier (-1) muncul sebagai general topic
+        if row['Topic'] == -1 and len(topic_info) > 1: 
+            continue # Jika ada topik lain yang terbentuk, skip -1. Jika hanya ada -1, biarkan lolos.
+            
+        # Ambil kata kunci representatif dari BERTopic
+        words_list = topic_model.get_topic(row['Topic'])
+        if words_list:
+            topic_name = ", ".join([word for word, _ in words_list[:3]])
+        else:
+            topic_name = "Berita Umum / Campuran"
+            
         supabase.table("recommendation").insert({
             "topic_name": f"Topik: {topic_name}",
-            "recommendation_score": float(row['Count'] * 1.5), # Baseline rule sederhana
-            "reason": f"Topik ini mendominasi dengan total {row['Count']} berita dalam beberapa jam terakhir."
+            "recommendation_score": float(row['Count'] * 1.5),
+            "reason": f"Mencakup total {row['Count']} pembahasan berita yang terpantau dalam pipeline terakhir."
         }).execute()
+        has_recommendation = True
 
-    print("Pipeline Selesai! Data berhasil diperbarui di Supabase.")
+    # Jika benar-benar tidak ada rekomendasi formal yang lolos
+    if not has_recommendation:
+        supabase.table("recommendation").insert({
+            "topic_name": "Topik: Berita Hangat Harian",
+            "recommendation_score": 10.0,
+            "reason": "Kumpulan berita campuran terbaru dari media nasional yang siap ditinjau oleh redaksi."
+        }).execute()
 
 if __name__ == "__main__":
     main()
