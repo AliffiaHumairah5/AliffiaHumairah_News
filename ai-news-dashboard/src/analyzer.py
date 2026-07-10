@@ -6,7 +6,10 @@ import pandas as pd
 # Pipelining ini akan berjalan di komputer GitHub Actions yang punya RAM 16GB
 sentiment_pipeline = pipeline(
     "sentiment-analysis", 
-    model="w11wo/indonesian-roberta-base-sentiment-classifier" # Contoh model publik IndoBERT
+    PATH_MODEL = "ualiffiaaliffia/indobert-sentiment"
+
+tokenizer = AutoTokenizer.from_pretrained(PATH_MODEL)
+model = AutoModelForSequenceClassification.from_pretrained(PATH_MODEL)
 )
 
 def analyze_sentiment(title, summary):
