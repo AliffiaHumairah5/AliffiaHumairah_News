@@ -7,3 +7,4 @@ torch
 bertopic
 streamlit
 st-supabase-connection
+streamlit-autorefresh
