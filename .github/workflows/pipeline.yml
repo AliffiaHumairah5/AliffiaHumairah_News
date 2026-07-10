@@ -2,8 +2,8 @@ name: AI News Trend Pipeline
 
 on:
   schedule:
-    - cron: '*/5 * * * *'  # Otomatis jalan setiap 3 menit
-  workflow_dispatch:      # Tombol manual biar bisa dites kapan aja
+    - cron: '*/5 * * * *'  # Otomatis jalan setiap 5 menit (untuk uji coba)
+  workflow_dispatch:      # Tombol manual
 
 jobs:
   run-pipeline:
@@ -15,15 +15,16 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
-        python-version: '3.12'
+        python-version: '3.10'
 
     - name: Install Dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -r requirements.txt
+        cd ai-news-dashboard && pip install -r requirements.txt
 
     - name: Run Pipeline Script
       env:
         SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
         SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-      run: python src/main_pipeline.py
+      run: |
+        cd ai-news-dashboard && python src/main_pipeline.py
