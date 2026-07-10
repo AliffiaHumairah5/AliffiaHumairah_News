@@ -2,7 +2,7 @@ name: AI News Trend Pipeline
 
 on:
   schedule:
-    - cron: '*/3 * * * *'  # Otomatis jalan setiap 3 menit
+    - cron: '*/5 * * * *'  # Otomatis jalan setiap 3 menit
   workflow_dispatch:      # Tombol manual biar bisa dites kapan aja
 
 jobs:
