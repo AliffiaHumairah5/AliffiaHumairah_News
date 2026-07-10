@@ -1,111 +1,131 @@
 import streamlit as st
-from supabase import create_client
 import os
+from supabase import create_client
+import pandas as pd
+import plotly.express as px
 
-# Konfigurasi halaman
-st.set_page_config(page_title="News Trend Intelligence Dashboard", layout="wide")
+# 1. KONFIGURASI HALAMAN STREAMLIT
+st.set_page_config(
+    page_title="AI-Based News Trend Intelligence Dashboard",
+    page_icon="📊",
+    layout="wide"
+)
 
-# Inisialisasi Supabase (Sebaiknya gunakan st.secrets di Streamlit Cloud)
-SUPABASE_URL = st.secrets.get("SUPABASE_URL", "URL_LOKAL_KAMU_JIKA_TES")
-SUPABASE_KEY = st.secrets.get("SUPABASE_KEY", "KEY_LOKAL_KAMU_JIKA_TES")
+# 2. KONEKSI SUPABASE
+# Mengambil variabel env dari Streamlit Secrets atau Local Env
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
+
+if not SUPABASE_URL or not SUPABASE_KEY:
+    st.error("Kredensial SUPABASE_URL atau SUPABASE_KEY belum diatur di Streamlit Secrets!")
+    st.stop()
+
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
+# 3. HEADER DASHBOARD
 st.title("📊 AI-Based News Trend Intelligence Dashboard")
 st.caption("Sistem Analisis Tren & Sentimen Berita untuk Digo News & Urban Radio")
 st.markdown("---")
 
-# Layout Kolom Utama
-col1, col2 = st.columns([2, 1])
+# 4. MEMBUAT TATA LETAK KOLOM (KIRI & KANAN)
+col_left, col_right = st.columns([3, 2])
 
-with col1:
-    st.header("💡 Rekomendasi Topik Hari Ini")
+# ==================== KOLOM KIRI: REKOMENDASI TOPIK ====================
+with col_left:
+    st.subheader("💡 Rekomendasi Topik Hari Ini")
     
-    # Ambil data rekomendasi terbaru dari gudang data Supabase
-    response = supabase.table("recommendation").select("*").order("created_at", desc=True).limit(10).execute()
-    recommendations = response.data
-    
-    if recommendations:
-        for rec in recommendations:
-            with st.expander(f"📌 {rec['topic_name']} (Skor: {rec['recommendation_score']})"):
-                st.write(f"**Alasan Rekomendasi:** {rec['reason']}")
-                st.write(f"**Status Saat Ini:** `{rec['status']}`")
-                
-                # Fitur Feedback Loop sesuai FR-11 di PRD kamu
-                col_btn1, col_btn2 = st.columns(2)
-                if col_btn1.button("✅ Gunakan Topik", key=f"use_{rec['id']}"):
-                    supabase.table("recommendation").update({"status": "digunakan"}).eq("id", rec['id']).execute()
-                    st.success("Status diperbarui!")
-                    
-                if col_btn2.button("❌ Abaikan", key=f"ignore_{rec['id']}"):
-                    supabase.table("recommendation").update({"status": "tidak digunakan"}).eq("id", rec['id']).execute()
-                    st.error("Rekomendasi diabaikan.")
-    else:
-        st.info("Belum ada data rekomendasi. Silakan jalankan pipeline pengolah data terlebih dahulu.")
-
-with col2:
-    st.header("📈 Sekilas Sentimen Terakhir")
-    
-    # Ambil 5 data sentimen berita terbaru untuk visualisasi ringkas
-    sent_res = supabase.table("sentiment").select("sentiment").order("created_at", desc=True).limit(100).execute()
-    
-    if sent_res.data:
-        import pandas as pd
-        df_sent = pd.DataFrame(sent_res.data)
-        sentiment_counts = df_sent['sentiment'].value_counts()
+    try:
+        # Ambil data rekomendasi dari database Supabase
+        recommendations = supabase.table("recommendation").select("*").order("recommendation_score", desc=True).execute().data
         
-        # Tampilkan metrik sederhana
-        st.bar_chart(sentiment_counts)
-    else:
-        st.info("Data sentimen belum tersedia.")
+        if not recommendations:
+            st.info("Belum ada data rekomendasi. Silakan jalankan pipeline pengolah data terlebih dahulu.")
+        else:
+            # Menggunakan enumerate(recommendations) untuk menjamin 'index' unik pada setiap tombol widget
+            for index, rec in enumerate(recommendations):
+                with st.expander(f"📌 {rec['topic_name']} (Skor: {rec['recommendation_score']})"):
+                    st.write(f"**Alasan Rekomendasi:** {rec['reason']}")
+                    
+                    st.markdown("---")
+                    st.write("📰 **Artikel Berita Terkait dalam Tren Ini:**")
+                    
+                    # Ekstraksi kata kunci utama dari text nama topik untuk mencarian relasi berita
+                    clean_keywords = rec['topic_name'].replace("Topik:", "").split(",")
+                    main_keyword = clean_keywords[-1].strip() if clean_keywords else ""
+                    
+                    if main_keyword and len(main_keyword) > 2:
+                        # Cari maksimal 5 berita di tabel 'news' yang judulnya mirip kata kunci ini
+                        related_news = supabase.table("news")\
+                            .select("title", "source", "url")\
+                            .ilike("title", f"%{main_keyword}%")\
+                            .limit(5)\
+                            .execute().data
+                        
+                        if related_news:
+                            for news in related_news:
+                                st.markdown(f"- [{news['title']}]({news['url']}) *({news['source']})*")
+                        else:
+                            st.write("*Detail artikel sedang dimuat atau klasifikasi topik sangat umum.*")
+                    else:
+                        st.write("*Menampilkan kumpulan berita campuran makro harian.*")
+                    
+                    st.markdown("---")
+                    
+                    # Bagian Tombol Aksi Redaksi dengan KEY yang unik (menggunakan gabungan indeks dan potongan nama topik)
+                    btn_col1, btn_col2 = st.columns(2)
+                    with btn_col1:
+                        if st.button("✅ Gunakan Topik", key=f"use_{index}_{rec['topic_name'][:10]}"):
+                            st.success(f"Topik '{rec['topic_name']}' berhasil dipilih untuk produksi berita!")
+                    with btn_col2:
+                        if st.button("❌ Abaikan", key=f"ignore_{index}_{rec['topic_name'][:10]}"):
+                            st.warning("Topik diabaikan.")
+                            
+    except Exception as e:
+        st.error(f"Gagal memuat data rekomendasi: {e}")
 
-# --- KODE UNTUK MENAMPILKAN DETAIL TOPIK DI APP.PY ---
-
-st.subheader("💡 Rekomendasi Topik Hari Ini")
-
-# Ambil data rekomendasi dari Supabase
-recommendations = supabase.table("recommendation").select("*").execute().data
-
-if not recommendations:
-    st.info("Belum ada data rekomendasi. Silakan jalankan pipeline pengolah data terlebih dahulu.")
-else:
-    for rec in recommendations:
-        # Membuat kotak dropdown yang bisa diklik (Expander)
-        with st.expander(f"📌 {rec['topic_name']} (Skor: {rec['recommendation_score']})"):
-            st.write(f"**Alasan Rekomendasi:** {rec['reason']}")
+# ==================== KANAN: GRAFIK ANALISIS SENTIMEN ====================
+with col_right:
+    st.subheader("📈 Sekilas Sentimen Terakhir")
+    
+    try:
+        # Ambil data dari tabel sentiment di Supabase
+        sentiment_data = supabase.table("sentiment").select("sentiment").execute().data
+        
+        if not sentiment_data:
+            st.info("Data sentimen belum tersedia.")
+        else:
+            # Konversi hasil query database ke bentuk DataFrame Pandas
+            df_sentiment = pd.DataFrame(sentiment_data)
             
-            # --- BAGIAN DETAIL TAMBAHAN (BIAR LEBIH DETAIL) ---
-            st.markdown("---")
-            st.write("📰 **Artikel Berita Terkait dalam Tren Ini:**")
+            # Hitung jumlah total kemunculan tiap kategori sentiment (positif, negatif, netral)
+            sentiment_counts = df_sentiment['sentiment'].value_counts().reset_index()
+            sentiment_counts.columns = ['Sentimen', 'Jumlah']
             
-            # Kita bersihkan teks kata kunci untuk mencari berita yang mirip di database
-            # Misal dari "Topik: di, jampidsus, korupsi" diambil kata kuncinya saja
-            clean_keywords = rec['topic_name'].replace("Topik:", "").split(",")
-            main_keyword = clean_keywords[-1].strip() if clean_keywords else ""
+            # Skema warna grafik agar serasi dan profesional
+            color_map = {
+                'positif': '#2ecc71', # Hijau
+                'netral': '#3498db',  # Biru
+                'negatif': '#e74c3c'  # Merah
+            }
             
-            if main_keyword and len(main_keyword) > 2:
-                # Cari berita di database yang judul atau kontennya mengandung kata kunci utama ini
-                related_news = supabase.table("news")\
-                    .select("title", "source", "url")\
-                    .ilike("title", f"%{main_keyword}%")\
-                    .limit(5)\
-                    .execute().data
-                
-                if related_news:
-                    for news in related_news:
-                        st.markdown(f"- [{news['title']}]({news['url']}) *({news['source']})*")
-                else:
-                    st.write("*Detail artikel sedang dimuat atau klasifikasi topik sangat umum.*")
-            else:
-                st.write("*Menampilkan kumpulan berita campuran makro harian.*")
+            # Membuat visualisasi grafik batang interaktif menggunakan Plotly
+            fig = px.bar(
+                sentiment_counts, 
+                x='Sentimen', 
+                y='Jumlah',
+                color='Sentimen',
+                color_discrete_map=color_map,
+                text_auto=True
+            )
             
-            st.markdown("---")
-            # --- AKHIR BAGIAN DETAIL TAMBAHAN ---
-
-            # Tombol aksi redaksi
-            col1, col2 = st.columns(2)
-            with col1:
-                if st.button("✅ Gunakan Topik", key=f"use_{rec['id']}"):
-                    st.success("Topik berhasil dipilih untuk produksi berita!")
-            with col2:
-                if st.button("❌ Abaikan", key=f"ignore_{rec['id']}"):
-                    st.warning("Topik diabaikan.")
+            fig.update_layout(
+                showlegend=False,
+                margin=dict(l=20, r=20, t=20, b=20),
+                height=350
+            )
+            
+            # Tampilkan chart di dashboard Streamlit
+            st.plotly_chart(fig, use_container_width=True)
+            
+    except Exception as e:
+        st.error(f"Gagal memuat data grafik sentimen: {e}")
