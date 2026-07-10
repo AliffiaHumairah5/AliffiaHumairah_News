@@ -3,7 +3,6 @@ import os
 from supabase import create_client
 import pandas as pd
 import plotly.express as px
-# --- TAMBAHAN BARU: Import library untuk autorefresh ---
 from streamlit_autorefresh import st_autorefresh
 
 # 1. KONFIGURASI HALAMAN STREAMLIT
@@ -13,9 +12,8 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- TAMBAHAN BARU: Set pemicu refresh otomatis setiap 5 menit (300.000 milidetik) ---
-# Ini akan memaksa Streamlit mengeksekusi ulang kode dari atas ke bawah secara otomatis
-st_autorefresh(interval=300000, key="supabase_data_sync")
+# Pemicu refresh otomatis setiap 5 menit (300.000 milidetik)
+st_autorefresh(interval=300000, key="supabase_data_sync_dashboard")
 
 # 2. KONEKSI SUPABASE
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
@@ -40,7 +38,7 @@ with col_left:
     st.subheader("💡 Rekomendasi Topik Hari Ini")
     
     try:
-        # Menarik data langsung dari database (tanpa cache) agar selalu sinkron
+        # Ambil data rekomendasi dari database Supabase
         recommendations = supabase.table("recommendation").select("*").order("recommendation_score", desc=True).execute().data
         
         if not recommendations:
@@ -53,10 +51,25 @@ with col_left:
                     st.markdown("---")
                     st.write("📰 **Artikel Berita Terkait dalam Tren Ini:**")
                     
-                    clean_keywords = rec['topic_name'].replace("Topik:", "").split(",")
-                    main_keyword = clean_keywords[-1].strip() if clean_keywords else ""
+                    # --- PERBAIKAN LOGIKA EKSTRAKSI KATA KUNCI ---
+                    # Menghilangkan kata "Topik:" dan memisahkan berdasarkan koma
+                    clean_text = rec['topic_name'].replace("Topik:", "").strip()
+                    keywords = [k.strip() for k in clean_text.split(",") if len(k.strip()) > 2]
                     
-                    if main_keyword and len(main_keyword) > 2:
+                    # Memilih kata kunci yang valid (bukan kata hubung/kata depan)
+                    main_keyword = ""
+                    stop_words = ['di', 'dan', 'yang', 'untuk', 'ke', 'dari', 'dengan', 'dalam']
+                    for kw in keywords:
+                        if kw.lower() not in stop_words:
+                            main_keyword = kw
+                            break
+                    
+                    # Jika semua kata berupa stop words, ambil kata pertama saja
+                    if not main_keyword and keywords:
+                        main_keyword = keywords[0]
+                    
+                    # Jalankan query pencarian jika kata kunci ditemukan
+                    if main_keyword:
                         related_news = supabase.table("news")\
                             .select("title", "source", "url")\
                             .ilike("title", f"%{main_keyword}%")\
@@ -67,12 +80,13 @@ with col_left:
                             for news in related_news:
                                 st.markdown(f"- [{news['title']}]({news['url']}) *({news['source']})*")
                         else:
-                            st.write("*Detail artikel sedang dimuat atau klasifikasi topik sangat umum.*")
+                            st.write(f"*Tidak ada artikel di tabel 'news' yang spesifik memuat kata '{main_keyword}'.*")
                     else:
                         st.write("*Menampilkan kumpulan berita campuran makro harian.*")
                     
                     st.markdown("---")
                     
+                    # Bagian Tombol Aksi Redaksi
                     btn_col1, btn_col2 = st.columns(2)
                     with btn_col1:
                         if st.button("✅ Gunakan Topik", key=f"use_{index}_{rec['topic_name'][:10]}"):
@@ -89,43 +103,47 @@ with col_right:
     st.subheader("📈 Sekilas Sentimen Terakhir")
     
     try:
-        # Menarik data murni langsung dari tabel sentiment Supabase setiap siklus 5 menit
-        sentiment_data = supabase.table("sentiment").select("sentiment").execute().data
+        # --- PERBAIKAN QUERY: Diarahkan langsung ke tabel 'news' agar sinkron dengan total records ---
+        news_data = supabase.table("news").select("sentiment").execute().data
         
-        if not sentiment_data:
-            st.info("Data sentimen belum tersedia.")
+        if not news_data:
+            st.info("Data sentimen di tabel berita belum tersedia.")
         else:
-            df_sentiment = pd.DataFrame(sentiment_data)
+            # Konversi hasil query database ke bentuk DataFrame Pandas
+            df_news = pd.DataFrame(news_data)
             
-            sentiment_counts = df_sentiment['sentiment'].value_counts().reset_index()
-            sentiment_counts.columns = ['Sentimen', 'Jumlah']
-            
-            # Skema warna grafik (pastikan teks label di database berupa lowercase agar cocok)
-            color_map = {
-                'positif': '#2ecc71',
-                'netral': '#3498db',
-                'negatif': '#e74c3c',
-                'positive': '#2ecc71', # Antisipasi jika data bertuliskan bahasa inggris
-                'neutral': '#3498db',
-                'negative': '#e74c3c'
-            }
-            
-            fig = px.bar(
-                sentiment_counts, 
-                x='Sentimen', 
-                y='Jumlah',
-                color='Sentimen',
-                color_discrete_map=color_map,
-                text_auto=True
-            )
-            
-            fig.update_layout(
-                showlegend=False,
-                margin=dict(l=20, r=20, t=20, b=20),
-                height=350
-            )
-            
-            st.plotly_chart(fig, use_container_width=True)
-            
+            # Memastikan kolom 'sentiment' ada dan memiliki data sebelum dihitung
+            if 'sentiment' in df_news.columns and not df_news['sentiment'].isnull().all():
+                # Hitung jumlah total kemunculan tiap kategori sentiment
+                sentiment_counts = df_news['sentiment'].value_counts().reset_index()
+                sentiment_counts.columns = ['Sentimen', 'Jumlah']
+                
+                # Skema warna grafik untuk melingkupi teks bahasa Indonesia maupun bahasa Inggris dari model AI
+                color_map = {
+                    'positif': '#2ecc71', 'netral': '#3498db', 'negatif': '#e74c3c',
+                    'positive': '#2ecc71', 'neutral': '#3498db', 'negative': '#e74c3c'
+                }
+                
+                # Membuat visualisasi grafik batang interaktif menggunakan Plotly
+                fig = px.bar(
+                    sentiment_counts, 
+                    x='Sentimen', 
+                    y='Jumlah',
+                    color='Sentimen',
+                    color_discrete_map=color_map,
+                    text_auto=True
+                )
+                
+                fig.update_layout(
+                    showlegend=False,
+                    margin=dict(l=20, r=20, t=20, b=20),
+                    height=350
+                )
+                
+                # Tampilkan chart di dashboard Streamlit
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.warning("Kolom 'sentiment' di tabel 'news' ditemukan, tetapi datanya masih kosong (NULL).")
+                
     except Exception as e:
         st.error(f"Gagal memuat data grafik sentimen: {e}")
